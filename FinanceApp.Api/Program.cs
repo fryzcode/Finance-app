@@ -158,6 +158,24 @@ public class Program
         .WithName("GetWeatherForecast")
         .WithOpenApi();
 
+        // Apply database migrations in production
+        if (app.Environment.IsProduction())
+        {
+            using (var scope = app.Services.CreateScope())
+            {
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                try
+                {
+                    context.Database.Migrate();
+                }
+                catch (Exception ex)
+                {
+                    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+                    logger.LogError(ex, "An error occurred while migrating the database.");
+                }
+            }
+        }
+
         // Hangfire dashboard (dev only)
         if (app.Environment.IsDevelopment())
         {
