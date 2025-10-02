@@ -26,30 +26,24 @@ public class Program
 
         // Get database connection string with fallback
         var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+        string connectionString;
         
-        // Clean and validate the connection string
-        if (!string.IsNullOrEmpty(databaseUrl))
+        if (!string.IsNullOrEmpty(databaseUrl) && databaseUrl.StartsWith("postgresql://"))
         {
-            databaseUrl = databaseUrl.Trim();
-            // Remove any potential invisible characters
-            databaseUrl = new string(databaseUrl.Where(c => !char.IsControl(c) || char.IsWhiteSpace(c)).ToArray());
+            // Convert PostgreSQL URL to connection string format
+            var uri = new Uri(databaseUrl);
+            connectionString = $"Host={uri.Host};Port={uri.Port};Database={uri.LocalPath.TrimStart('/')};Username={uri.UserInfo.Split(':')[0]};Password={uri.UserInfo.Split(':')[1]};SSL Mode=Require;Trust Server Certificate=true";
+            Console.WriteLine("Converted PostgreSQL URL to connection string format");
         }
-        
-        var connectionString = databaseUrl 
+        else
+        {
+            connectionString = databaseUrl 
                              ?? configuration.GetConnectionString("DefaultConnection")
                              ?? "Host=localhost;Port=5432;Database=finance_app;Username=postgres;Password=postgres";
+        }
         
         Console.WriteLine($"DATABASE_URL environment variable: {(string.IsNullOrEmpty(databaseUrl) ? "NOT SET" : "SET")}");
-        Console.WriteLine($"Raw DATABASE_URL: '{databaseUrl ?? "NULL"}'");
-        Console.WriteLine($"Using connection string: {(string.IsNullOrEmpty(connectionString) ? "EMPTY" : "CONFIGURED")}");
-        Console.WriteLine($"Connection string length: {connectionString?.Length ?? 0}");
-        
-        // Validate connection string format
-        if (!string.IsNullOrEmpty(connectionString) && !connectionString.StartsWith("postgresql://") && !connectionString.Contains("Host="))
-        {
-            Console.WriteLine("WARNING: Connection string format looks invalid!");
-            connectionString = "Host=localhost;Port=5432;Database=finance_app;Username=postgres;Password=postgres";
-        }
+        Console.WriteLine($"Final connection string configured: {!string.IsNullOrEmpty(connectionString)}");
 
         // EF Core DbContext
         builder.Services.AddDbContext<ApplicationDbContext>(options =>
