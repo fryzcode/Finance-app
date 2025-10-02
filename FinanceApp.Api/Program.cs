@@ -23,9 +23,14 @@ public class Program
         // Configuration
         var configuration = builder.Configuration;
 
+        // Get database connection string with fallback
+        var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL") 
+                             ?? configuration.GetConnectionString("DefaultConnection")
+                             ?? "Host=localhost;Port=5432;Database=finance_app;Username=postgres;Password=postgres";
+
         // EF Core DbContext
         builder.Services.AddDbContext<ApplicationDbContext>(options =>
-            options.UseNpgsql(configuration.GetConnectionString("DefaultConnection")));
+            options.UseNpgsql(connectionString));
 
         // CORS
         var allowedOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
@@ -40,7 +45,9 @@ public class Program
         });
 
         // Authentication - JWT
-        var jwtKey = configuration["Jwt:Key"] ?? string.Empty;
+        var jwtKey = Environment.GetEnvironmentVariable("JWT_SECRET_KEY") 
+                   ?? configuration["Jwt:Key"] 
+                   ?? "default-development-key-not-for-production";
         var issuer = configuration["Jwt:Issuer"];
         var audience = configuration["Jwt:Audience"];
         builder.Services
@@ -76,7 +83,7 @@ public class Program
             config.SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
                   .UseSimpleAssemblyNameTypeSerializer()
                   .UseRecommendedSerializerSettings()
-                  .UsePostgreSqlStorage(configuration.GetConnectionString("DefaultConnection"));
+                  .UsePostgreSqlStorage(connectionString);
         });
         builder.Services.AddHangfireServer(options =>
         {
@@ -172,6 +179,7 @@ public class Program
                 {
                     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
                     logger.LogError(ex, "An error occurred while migrating the database.");
+                    // Don't throw - let the app start even if migration fails
                 }
             }
         }
@@ -182,16 +190,30 @@ public class Program
             app.UseHangfireDashboard("/hangfire");
         }
 
-        // Schedule recurring job daily at 00:05 UTC
-        RecurringJob.AddOrUpdate<ISalaryCreditJob>(
-            "monthly-salary-credit",
-            job => job.RunAsync(CancellationToken.None),
-            "5 0 * * *");
+        // Schedule recurring jobs after app starts
+        try
+        {
+            using (var scope = app.Services.CreateScope())
+            {
+                var recurringJobManager = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
+                
+                // Schedule recurring job daily at 00:05 UTC
+                recurringJobManager.AddOrUpdate<ISalaryCreditJob>(
+                    "monthly-salary-credit",
+                    job => job.RunAsync(CancellationToken.None),
+                    "5 0 * * *");
 
-        RecurringJob.AddOrUpdate<INeedsDeductionJob>(
-            "daily-needs-deduction",
-            job => job.RunAsync(CancellationToken.None),
-            "10 0 * * *");
+                recurringJobManager.AddOrUpdate<INeedsDeductionJob>(
+                    "daily-needs-deduction",
+                    job => job.RunAsync(CancellationToken.None),
+                    "10 0 * * *");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail startup
+            Console.WriteLine($"Failed to schedule recurring jobs: {ex.Message}");
+        }
 
         app.Run();
     }
