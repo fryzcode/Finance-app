@@ -1,4 +1,5 @@
 
+using System.Linq;
 using System.Text;
 using Hangfire;
 using Hangfire.PostgreSql;
@@ -25,12 +26,30 @@ public class Program
 
         // Get database connection string with fallback
         var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+        
+        // Clean and validate the connection string
+        if (!string.IsNullOrEmpty(databaseUrl))
+        {
+            databaseUrl = databaseUrl.Trim();
+            // Remove any potential invisible characters
+            databaseUrl = new string(databaseUrl.Where(c => !char.IsControl(c) || char.IsWhiteSpace(c)).ToArray());
+        }
+        
         var connectionString = databaseUrl 
                              ?? configuration.GetConnectionString("DefaultConnection")
                              ?? "Host=localhost;Port=5432;Database=finance_app;Username=postgres;Password=postgres";
         
         Console.WriteLine($"DATABASE_URL environment variable: {(string.IsNullOrEmpty(databaseUrl) ? "NOT SET" : "SET")}");
+        Console.WriteLine($"Raw DATABASE_URL: '{databaseUrl ?? "NULL"}'");
         Console.WriteLine($"Using connection string: {(string.IsNullOrEmpty(connectionString) ? "EMPTY" : "CONFIGURED")}");
+        Console.WriteLine($"Connection string length: {connectionString?.Length ?? 0}");
+        
+        // Validate connection string format
+        if (!string.IsNullOrEmpty(connectionString) && !connectionString.StartsWith("postgresql://") && !connectionString.Contains("Host="))
+        {
+            Console.WriteLine("WARNING: Connection string format looks invalid!");
+            connectionString = "Host=localhost;Port=5432;Database=finance_app;Username=postgres;Password=postgres";
+        }
 
         // EF Core DbContext
         builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -81,32 +100,8 @@ public class Program
         // Notification service
         builder.Services.AddScoped<INotificationService, NotificationService>();
 
-        // Hangfire - only enable if we have a valid connection string
-        if (!string.IsNullOrEmpty(connectionString) && connectionString != "Host=localhost;Port=5432;Database=finance_app;Username=postgres;Password=postgres")
-        {
-            try
-            {
-                builder.Services.AddHangfire(config =>
-                {
-                    config.SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
-                          .UseSimpleAssemblyNameTypeSerializer()
-                          .UseRecommendedSerializerSettings()
-                          .UsePostgreSqlStorage(connectionString);
-                });
-                builder.Services.AddHangfireServer(options =>
-                {
-                    options.Queues = new[] { configuration["Hangfire:Queue"] ?? "default" };
-                });
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to initialize Hangfire: {ex.Message}");
-            }
-        }
-        else
-        {
-            Console.WriteLine("Skipping Hangfire initialization - no valid database connection string");
-        }
+        // Hangfire - disabled for now to get basic API working
+        Console.WriteLine("Hangfire disabled for initial deployment");
 
         // Controllers & Minimal APIs support
         builder.Services.AddControllers();
@@ -208,30 +203,8 @@ public class Program
             app.UseHangfireDashboard("/hangfire");
         }
 
-        // Schedule recurring jobs after app starts
-        try
-        {
-            using (var scope = app.Services.CreateScope())
-            {
-                var recurringJobManager = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
-                
-                // Schedule recurring job daily at 00:05 UTC
-                recurringJobManager.AddOrUpdate<ISalaryCreditJob>(
-                    "monthly-salary-credit",
-                    job => job.RunAsync(CancellationToken.None),
-                    "5 0 * * *");
-
-                recurringJobManager.AddOrUpdate<INeedsDeductionJob>(
-                    "daily-needs-deduction",
-                    job => job.RunAsync(CancellationToken.None),
-                    "10 0 * * *");
-            }
-        }
-        catch (Exception ex)
-        {
-            // Log but don't fail startup
-            Console.WriteLine($"Failed to schedule recurring jobs: {ex.Message}");
-        }
+        // Recurring jobs disabled for initial deployment
+        Console.WriteLine("Recurring jobs disabled for initial deployment");
 
         app.Run();
     }
