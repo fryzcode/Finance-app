@@ -32,8 +32,10 @@ public class Program
         {
             // Convert PostgreSQL URL to connection string format
             var uri = new Uri(databaseUrl);
-            connectionString = $"Host={uri.Host};Port={uri.Port};Database={uri.LocalPath.TrimStart('/')};Username={uri.UserInfo.Split(':')[0]};Password={uri.UserInfo.Split(':')[1]};SSL Mode=Require;Trust Server Certificate=true";
-            Console.WriteLine("Converted PostgreSQL URL to connection string format");
+            var port = uri.Port == -1 ? 5432 : uri.Port; // Default PostgreSQL port
+            var userInfo = uri.UserInfo.Split(':');
+            connectionString = $"Host={uri.Host};Port={port};Database={uri.LocalPath.TrimStart('/')};Username={userInfo[0]};Password={userInfo[1]};SSL Mode=Require;Trust Server Certificate=true";
+            Console.WriteLine($"Converted PostgreSQL URL to connection string format - Host: {uri.Host}, Port: {port}");
         }
         else
         {
