@@ -24,9 +24,13 @@ public class Program
         var configuration = builder.Configuration;
 
         // Get database connection string with fallback
-        var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL") 
+        var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+        var connectionString = databaseUrl 
                              ?? configuration.GetConnectionString("DefaultConnection")
                              ?? "Host=localhost;Port=5432;Database=finance_app;Username=postgres;Password=postgres";
+        
+        Console.WriteLine($"DATABASE_URL environment variable: {(string.IsNullOrEmpty(databaseUrl) ? "NOT SET" : "SET")}");
+        Console.WriteLine($"Using connection string: {(string.IsNullOrEmpty(connectionString) ? "EMPTY" : "CONFIGURED")}");
 
         // EF Core DbContext
         builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -77,18 +81,32 @@ public class Program
         // Notification service
         builder.Services.AddScoped<INotificationService, NotificationService>();
 
-        // Hangfire
-        builder.Services.AddHangfire(config =>
+        // Hangfire - only enable if we have a valid connection string
+        if (!string.IsNullOrEmpty(connectionString) && connectionString != "Host=localhost;Port=5432;Database=finance_app;Username=postgres;Password=postgres")
         {
-            config.SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
-                  .UseSimpleAssemblyNameTypeSerializer()
-                  .UseRecommendedSerializerSettings()
-                  .UsePostgreSqlStorage(connectionString);
-        });
-        builder.Services.AddHangfireServer(options =>
+            try
+            {
+                builder.Services.AddHangfire(config =>
+                {
+                    config.SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+                          .UseSimpleAssemblyNameTypeSerializer()
+                          .UseRecommendedSerializerSettings()
+                          .UsePostgreSqlStorage(connectionString);
+                });
+                builder.Services.AddHangfireServer(options =>
+                {
+                    options.Queues = new[] { configuration["Hangfire:Queue"] ?? "default" };
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to initialize Hangfire: {ex.Message}");
+            }
+        }
+        else
         {
-            options.Queues = new[] { configuration["Hangfire:Queue"] ?? "default" };
-        });
+            Console.WriteLine("Skipping Hangfire initialization - no valid database connection string");
+        }
 
         // Controllers & Minimal APIs support
         builder.Services.AddControllers();
